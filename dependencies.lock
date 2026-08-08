@@ -2,7 +2,7 @@ dependencies:
   espressif/tinyusb:
     dependencies: []
     source:
-      path: D:\zhuomian\weite\ESP32\esp_recorder_v1.1_full_features\components\espressif__tinyusb
+      path: D:\zhuomian\weite\ESP32\esp_recorder_v1.2_dev\components\espressif__tinyusb
       type: local
     version: 0.18.0~1
   idf:
