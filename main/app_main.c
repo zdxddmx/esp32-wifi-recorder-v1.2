@@ -8,7 +8,7 @@
 
 #include "sd_card.h"
 #include "uart_driver.h"
-#include "usb_cdc.h"
+#include "usb_cdc_bridge.h"
 #include "usb_msc.h"
 #include "wifi_config.h"
 #include "data_recorder.h"
@@ -18,12 +18,6 @@
 #include "console_cmd.h"
 
 #define TAG "main"
-
-static void usb_cdc_rx_handler(const uint8_t *data, size_t len)
-{
-    (void)data;
-    (void)len;
-}
 
 /* USB 复合设备挂载成功后，FATFS 必须与 SD 卡块设备互斥访问：
  * 卸载 FATFS，把 SD 卡完全交给 USB 主机。 */
@@ -172,7 +166,7 @@ void app_main(void)
     console_start();
 
     /* USB MSC starts last so mount callbacks see initialized recorder/config. */
-    ESP_ERROR_CHECK(usb_cdc_init(usb_cdc_rx_handler));
+    ESP_ERROR_CHECK(usb_cdc_bridge_init());
     ESP_ERROR_CHECK(usb_msc_init());
 
     ESP_LOGI(TAG, "esp_recorder init complete");

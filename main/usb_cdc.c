@@ -11,6 +11,7 @@
 #define USB_CDC_RX_BUF_SIZE 512
 #define TUSB_DESC_TOTAL_LEN (TUD_CONFIG_DESC_LEN + TUD_CDC_DESC_LEN + TUD_MSC_DESC_LEN)
 static usb_cdc_rx_cb_t s_rx_cb = NULL;
+static volatile bool s_initialized;
 
 enum {
     ITF_NUM_CDC = 0,
@@ -82,8 +83,28 @@ static void usb_cdc_rx_callback(int itf, cdcacm_event_t *event)
     }
 }
 
+static void usb_cdc_line_state_callback(int itf, cdcacm_event_t *event)
+{
+    if (itf != TINYUSB_CDC_ACM_0 || event == NULL ||
+        event->type != CDC_EVENT_LINE_STATE_CHANGED) {
+        return;
+    }
+
+    ESP_LOGI(TAG, "CDC host %s (DTR=%d RTS=%d)",
+             event->line_state_changed_data.dtr ? "connected" : "disconnected",
+             event->line_state_changed_data.dtr,
+             event->line_state_changed_data.rts);
+}
+
 esp_err_t usb_cdc_init(usb_cdc_rx_cb_t rx_cb)
 {
+    if (rx_cb == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (s_initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
     s_rx_cb = rx_cb;
     tinyusb_config_t tusb_cfg = {
         .device_descriptor = &descriptor_config,
@@ -98,6 +119,7 @@ esp_err_t usb_cdc_init(usb_cdc_rx_cb_t rx_cb)
     esp_err_t ret = tinyusb_driver_install(&tusb_cfg);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "tinyusb_driver_install failed: %s", esp_err_to_name(ret));
+        s_rx_cb = NULL;
         return ret;
     }
 
@@ -107,24 +129,36 @@ esp_err_t usb_cdc_init(usb_cdc_rx_cb_t rx_cb)
         .rx_unread_buf_sz = USB_CDC_RX_BUF_SIZE,
         .callback_rx = &usb_cdc_rx_callback,
         .callback_rx_wanted_char = NULL,
-        .callback_line_state_changed = NULL,
+        .callback_line_state_changed = &usb_cdc_line_state_callback,
         .callback_line_coding_changed = NULL,
     };
 
     ret = tusb_cdc_acm_init(&cdc_cfg);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "tusb_cdc_acm_init failed: %s", esp_err_to_name(ret));
+        tinyusb_driver_uninstall();
+        s_rx_cb = NULL;
         return ret;
     }
 
+    s_initialized = true;
     ESP_LOGI(TAG, "TinyUSB CDC + MSC composite device ready");
     return ESP_OK;
+}
+
+bool usb_cdc_is_connected(void)
+{
+    return s_initialized && tud_mounted() &&
+           tud_cdc_n_connected(TINYUSB_CDC_ACM_0);
 }
 
 int usb_cdc_write(const uint8_t *data, size_t len)
 {
     if (data == NULL || len == 0) {
-        return 0;
+        return -1;
+    }
+    if (!usb_cdc_is_connected()) {
+        return -1;
     }
 
     size_t queued = tinyusb_cdcacm_write_queue(TINYUSB_CDC_ACM_0, data, len);
@@ -136,8 +170,10 @@ int usb_cdc_write(const uint8_t *data, size_t len)
 
 int usb_cdc_read(uint8_t *buf, size_t len, uint32_t timeout_ms)
 {
+    (void) timeout_ms;
+
     if (buf == NULL || len == 0) {
-        return 0;
+        return -1;
     }
 
     size_t rx_size = 0;
